@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prepare Client Boundary File</title>
+<script src="https://unpkg.com/shpjs@latest/dist/shp.js"></script>
+<style>
+  body { font-family: -apple-system, Arial, sans-serif; background: #14171A; color: #E8EAED; padding: 32px; max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 18px; }
+  p { color: #9AA3AC; font-size: 13px; line-height: 1.6; }
+  .dropzone { border: 1px dashed #2C3136; border-radius: 6px; padding: 20px; text-align: center; font-size: 13px; color: #9AA3AC; cursor: pointer; margin-bottom: 16px; }
+  .dropzone:hover { border-color: #F0A93C; }
+  .dropzone input { display: none; }
+  select, button { width: 100%; background: #1E2226; color: #E8EAED; border: 1px solid #2C3136; border-radius: 6px; padding: 10px; font-size: 13px; margin-bottom: 12px; }
+  button { background: #F0A93C; color: #14171A; font-weight: 600; border: none; cursor: pointer; }
+  button:disabled { background: #444; color: #888; cursor: default; }
+  #status { font-size: 12px; color: #2BA890; margin-top: 8px; }
+  #propList { font-size: 11px; color: #9AA3AC; margin-top: 4px; font-family: monospace; }
+</style>
+</head>
+<body>
+  <h1>Prepare a client's boundary file</h1>
+  <p>
+    One-time step per client: upload the statewide SRPREC shapefile zip,
+    pick the county (or counties) that client's race covers, and this
+    downloads a small, normalized GeoJSON file - filtered to just that
+    county, with clean property names (<code>PRECINCT_NUM</code> and
+    <code>COUNTY_FIPS</code>) so the live dashboard can match against it
+    automatically, with no manual field-mapping needed.
+  </p>
+
+  <div class="dropzone" id="drop">
+    <input type="file" id="fileInput" accept=".zip">
+    Drop the statewide SRPREC .zip here, or click to browse
+  </div>
+
+  <label style="font-size:12px;color:#9AA3AC">County (or counties) for this client's race</label>
+  <select id="countySelect" multiple size="8"></select>
+  <div style="font-size:11px;color:#9AA3AC;margin:-8px 0 12px">Ctrl/Cmd-click to select more than one, for races spanning multiple counties</div>
+
+  <label style="font-size:12px;color:#9AA3AC">Precinct ID property in the source file</label>
+  <select id="idPropSelect"></select>
+
+  <label style="font-size:12px;color:#9AA3AC">County property in the source file (skip if using filename-based detection)</label>
+  <select id="countyPropSelect"></select>
+
+  <button id="downloadBtn" disabled>Download normalized GeoJSON</button>
+  <div id="status"></div>
+  <div id="propList"></div>
+
+<script>
+const CA_COUNTIES = [
+  { name: "Alameda", pdiCode: "01", fips: "001" },{ name: "Alpine", pdiCode: "02", fips: "003" },
+  { name: "Amador", pdiCode: "03", fips: "005" },{ name: "Butte", pdiCode: "04", fips: "007" },
+  { name: "Calaveras", pdiCode: "05", fips: "009" },{ name: "Colusa", pdiCode: "06", fips: "011" },
+  { name: "Contra Costa", pdiCode: "07", fips: "013" },{ name: "Del Norte", pdiCode: "08", fips: "015" },
+  { name: "El Dorado", pdiCode: "09", fips: "017" },{ name: "Fresno", pdiCode: "10", fips: "019" },
+  { name: "Glenn", pdiCode: "11", fips: "021" },{ name: "Humboldt", pdiCode: "12", fips: "023" },
+  { name: "Imperial", pdiCode: "13", fips: "025" },{ name: "Inyo", pdiCode: "14", fips: "027" },
+  { name: "Kern", pdiCode: "15", fips: "029" },{ name: "Kings", pdiCode: "16", fips: "031" },
+  { name: "Lake", pdiCode: "17", fips: "033" },{ name: "Lassen", pdiCode: "18", fips: "035" },
+  { name: "Los Angeles", pdiCode: "19", fips: "037" },{ name: "Madera", pdiCode: "20", fips: "039" },
+  { name: "Marin", pdiCode: "21", fips: "041" },{ name: "Mariposa", pdiCode: "22", fips: "043" },
+  { name: "Mendocino", pdiCode: "23", fips: "045" },{ name: "Merced", pdiCode: "24", fips: "047" },
+  { name: "Modoc", pdiCode: "25", fips: "049" },{ name: "Mono", pdiCode: "26", fips: "051" },
+  { name: "Monterey", pdiCode: "27", fips: "053" },{ name: "Napa", pdiCode: "28", fips: "055" },
+  { name: "Nevada", pdiCode: "29", fips: "057" },{ name: "Orange", pdiCode: "30", fips: "059" },
+  { name: "Placer", pdiCode: "31", fips: "061" },{ name: "Plumas", pdiCode: "32", fips: "063" },
+  { name: "Riverside", pdiCode: "33", fips: "065" },{ name: "Sacramento", pdiCode: "34", fips: "067" },
+  { name: "San Benito", pdiCode: "35", fips: "069" },{ name: "San Bernardino", pdiCode: "36", fips: "071" },
+  { name: "San Diego", pdiCode: "37", fips: "073" },{ name: "San Francisco", pdiCode: "38", fips: "075" },
+  { name: "San Joaquin", pdiCode: "39", fips: "077" },{ name: "San Luis Obispo", pdiCode: "40", fips: "079" },
+  { name: "San Mateo", pdiCode: "41", fips: "081" },{ name: "Santa Barbara", pdiCode: "42", fips: "083" },
+  { name: "Santa Clara", pdiCode: "43", fips: "085" },{ name: "Santa Cruz", pdiCode: "44", fips: "087" },
+  { name: "Shasta", pdiCode: "45", fips: "089" },{ name: "Sierra", pdiCode: "46", fips: "091" },
+  { name: "Siskiyou", pdiCode: "47", fips: "093" },{ name: "Solano", pdiCode: "48", fips: "095" },
+  { name: "Sonoma", pdiCode: "49", fips: "097" },{ name: "Stanislaus", pdiCode: "50", fips: "099" },
+  { name: "Sutter", pdiCode: "51", fips: "101" },{ name: "Tehama", pdiCode: "52", fips: "103" },
+  { name: "Trinity", pdiCode: "53", fips: "105" },{ name: "Tulare", pdiCode: "54", fips: "107" },
+  { name: "Tuolumne", pdiCode: "55", fips: "109" },{ name: "Ventura", pdiCode: "56", fips: "111" },
+  { name: "Yolo", pdiCode: "57", fips: "113" },{ name: "Yuba", pdiCode: "58", fips: "115" }
+];
+const COUNTY_BY_FIPS = {};
+CA_COUNTIES.forEach(function (c) { COUNTY_BY_FIPS[c.fips] = c; });
+
+const countySelect = document.getElementById("countySelect");
+CA_COUNTIES.forEach(function (c) {
+  const opt = document.createElement("option");
+  opt.value = c.fips;
+  opt.textContent = c.name + " (" + c.fips + ")";
+  countySelect.appendChild(opt);
+});
+
+let allFeatures = [];
+
+function guessColumn(headers, keywords) {
+  const lower = headers.map(function (h) { return h.toLowerCase(); });
+  for (let i = 0; i < lower.length; i++) {
+    for (const kw of keywords) {
+      if (lower[i].indexOf(kw) !== -1) return headers[i];
+    }
+  }
+  return headers[0] || "";
+}
+
+function fillSelect(id, options, guess) {
+  const sel = document.getElementById(id);
+  sel.innerHTML = "";
+  options.forEach(function (opt) {
+    const el = document.createElement("option");
+    el.value = opt;
+    el.textContent = opt;
+    if (opt === guess) el.selected = true;
+    sel.appendChild(el);
+  });
+}
+
+document.getElementById("drop").addEventListener("click", function () {
+  document.getElementById("fileInput").click();
+});
+document.getElementById("fileInput").addEventListener("change", function (e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  document.getElementById("status").textContent = "Parsing shapefile...";
+  const reader = new FileReader();
+  reader.onload = function (e) {
+    shp(e.target.result).then(function (result) {
+      const collections = Array.isArray(result) ? result : [result];
+      allFeatures = [];
+      collections.forEach(function (fc) { allFeatures = allFeatures.concat(fc.features || []); });
+      document.getElementById("status").textContent = allFeatures.length + " statewide precincts loaded.";
+      const props = Object.keys(allFeatures[0].properties || {});
+      document.getElementById("propList").textContent = "Available properties: " + props.join(", ");
+      fillSelect("idPropSelect", props, guessColumn(props, ["srprec", "precinct", "prec"]));
+      fillSelect("countyPropSelect", ["(use filename / not available)"].concat(props), guessColumn(props, ["county", "cnty", "co_fips"]) || "(use filename / not available)");
+      document.getElementById("downloadBtn").disabled = false;
+    }).catch(function (err) {
+      document.getElementById("status").textContent = "Error: " + err.message;
+    });
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+document.getElementById("downloadBtn").addEventListener("click", function () {
+  const selectedFips = Array.from(countySelect.selectedOptions).map(function (o) { return o.value; });
+  if (selectedFips.length === 0) {
+    alert("Select at least one county first.");
+    return;
+  }
+  const idProp = document.getElementById("idPropSelect").value;
+  const countyProp = document.getElementById("countyPropSelect").value;
+
+  function resolveFips(feature) {
+    if (countyProp !== "(use filename / not available)") {
+      const raw = (feature.properties || {})[countyProp];
+      if (raw !== undefined && raw !== null) {
+        const asFips = raw.toString().trim().padStart(3, "0");
+        if (COUNTY_BY_FIPS[asFips]) return asFips;
+        const byName = CA_COUNTIES.find(function (c) { return c.name.toLowerCase() === raw.toString().trim().toLowerCase(); });
+        if (byName) return byName.fips;
+      }
+    }
+    return null;
+  }
+
+  const filtered = allFeatures
+    .filter(function (f) { return selectedFips.indexOf(resolveFips(f)) !== -1; })
+    .map(function (f) {
+      const fips = resolveFips(f);
+      return {
+        type: "Feature",
+        geometry: f.geometry,
+        properties: {
+          PRECINCT_NUM: ((f.properties || {})[idProp] || "").toString().replace(/^0+/, "") || "0",
+          COUNTY_FIPS: fips,
+          COUNTY_NAME: COUNTY_BY_FIPS[fips] ? COUNTY_BY_FIPS[fips].name : "",
+        },
+      };
+    });
+
+  if (filtered.length === 0) {
+    alert("No precincts matched the selected county/counties. Double-check the county property dropdown.");
+    return;
+  }
+
+  const geojson = { type: "FeatureCollection", features: filtered };
+  const blob = new Blob([JSON.stringify(geojson)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const countyNames = selectedFips.map(function (fips) { return COUNTY_BY_FIPS[fips].name.replace(/\s+/g, ""); }).join("-");
+  link.download = "precincts_" + countyNames + ".geojson";
+  link.href = url;
+  link.click();
+  document.getElementById("status").textContent = "Downloaded " + filtered.length + " precincts for " + countyNames + ".";
+});
+</script>
+</body>
+</html>
